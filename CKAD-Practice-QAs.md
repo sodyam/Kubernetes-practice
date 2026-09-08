@@ -462,3 +462,70 @@ spec:
 - All commands assume `kubectl` is available and configured for the target cluster.
 - Some questions intentionally use slightly different wording or minor variations of the same core task (common in real exam scenarios).
 - Always verify resources after creation with `kubectl get`, `kubectl describe`, and `kubectl logs` as appropriate.
+
+### Question
+## 11. 
+You have an existing deployment named api-server in the backend namespace. Using a single kubectl set command, update its container (also named api-server) to have:
+
+CPU request: 150m
+
+Memory request: 256Mi
+
+CPU limit: 300m
+
+Memory limit: 512Mi
+
+### Answer
+```
+k set resources deployment api-server -n backend -c api-server --requests=cpu=150m,memory=256Mi --limits=cpu=300m,memory=512Mi
+```
+### Question
+## 12.
+Create an Ingress resource named web-ingress in namespace frontend that routes host app.example.com on path /static to a Service named static-svc on port 8080.
+
+### Answer
+```
+k create ingress web-ingress -n frontend --rule="app.example.com/static=static-svc:8080"
+```
+
+### Question
+## 13.
+In namespace testing, spin up a pod named temp-worker using image busybox:1.36 in one command:
+
+Pass an environment variable: MODE=debug
+
+Set CPU request: 50m
+
+Set Memory limit: 64Mi
+
+Command to run inside: sleep 3600
+
+### Answer
+```
+k run temp-worker --image=busybox:1.36 -n testing --env="MODE=debug" --requests=cpu=50m --limits=memory=64Mi --command -- sleep 3600
+```
+### Question
+## 14.
+Create a ConfigMap named app-config in namespace prod:
+
+Literal key APP_COLOR set to dark-blue
+
+Literal key APP_RETRIES set to 5
+
+### Answer
+```
+k create cm app-config -n prod --from-literal=APP_COLOR=dark-blue --from-literal=APP_RETRIES=5
+```
+### Question
+## 15.
+Create a HorizontalPodAutoscaler named cache-hpa targeting deployment redis-cache in namespace cache-system:
+
+Minimum replicas: 3
+
+Maximum replicas: 10
+### Answer
+```
+kubectl autoscale deployment redis-cache -n cache-system --min=3 --max=10 --cpu-percent=80 --name=cache-hpa
+```
+
+
