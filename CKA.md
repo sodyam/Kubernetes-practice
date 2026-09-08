@@ -1,23 +1,84 @@
-Yes — this is a well-known (and tricky) CKA troubleshooting scenario involving a broken control plane after a migration from external etcd.
-What the question almost certainly was
-Something along the lines of:
-The cluster was recently migrated from an external etcd. The API server is down / the control plane is not functional. Fix it so that the cluster becomes healthy again. (Sometimes it also mentions that kube-system pods aren’t coming up or that CPU usage should stay under ~10% of the node’s capacity.)
-The three problems that are usually present together
-Wrong etcd endpoint in the API server static pod
-In /etc/kubernetes/manifests/kube-apiserver.yaml the --etcd-servers flag is still pointing at the old external etcd address (or a wrong IP/port).
-Fix: Change it to the local (stacked) etcd:
---etcd-servers=https://127.0.0.1:2379
-(This matches what the commenter “Xuupu” said.)
-kube-controller-manager CPU request is ridiculously high
-In its static pod manifest the resources.requests.cpu is set to something like "2" or "4". On the small exam nodes this prevents the static pod from ever starting.
-kube-scheduler has the same problem
-Same inflated CPU request, so it also fails to start.
-Why the original poster got stuck
-The API server manifest looked fine (port 2379 was already correct in their case, or they only checked the port).
-They only lowered the CPU requests on controller-manager and scheduler → nothing changed because the API server still couldn’t talk to etcd.
-journalctl and crictl showed little useful output because the static pods were either not starting or crashing immediately.
-Correct order of fixes
-Fix the --etcd-servers line in kube-apiserver.yaml → API server comes back.
-Lower the CPU requests (usually to 200m) in both kube-controller-manager.yaml and kube-scheduler.yaml.
-Wait a few seconds (or restart kubelet) and verify with kubectl get pods -n kube-system and kubectl get nodes.
-This exact multi-issue “migration from external etcd + oversized CPU requests” pattern has been reported by many candidates in 2025–2026 and matches both the original post and the helpful reply you screenshotted.
+A Kubernetes cluster was recently migrated from an external etcd setup to a local (stacked) etcd configuration. Following the migration, the control plane is unhealthy and the API server is unavailable.
+
+Investigation reveals that multiple control-plane components may be incorrectly configured.
+
+Perform the necessary troubleshooting steps to restore the cluster to a healthy state.
+
+Requirements
+Ensure the kube-apiserver can communicate with the local etcd instance.
+Ensure the kube-controller-manager and kube-scheduler can start successfully on the available node resources.
+Verify that the control plane and cluster become healthy.
+
+
+Step 1: Check the kube-apiserver etcd configuration
+
+Inspect the API server static Pod manifest:
+
+sudo vi /etc/kubernetes/manifests/kube-apiserver.yaml
+
+Locate the --etcd-servers argument.
+
+If it still points to an old external etcd endpoint, update it to the local etcd endpoint:
+
+- --etcd-servers=https://127.0.0.1:2379
+
+Save the file. Since this is a static Pod, the kubelet automatically detects the manifest change and recreates the API server.
+
+Step 2: Check the kube-controller-manager resource requests
+
+Inspect:
+
+sudo vi /etc/kubernetes/manifests/kube-controller-manager.yaml
+
+Check whether the CPU request is unnecessarily high.
+
+For example, change an excessive value such as:
+
+resources:
+  requests:
+    cpu: "2"
+
+to:
+
+resources:
+  requests:
+    cpu: 200m
+
+A very high CPU request can prevent the static Pod from being scheduled or started successfully on a small control-plane node.
+
+Step 3: Check the kube-scheduler resource requests
+
+Inspect:
+
+sudo vi /etc/kubernetes/manifests/kube-scheduler.yaml
+
+Similarly, reduce an excessively high CPU request:
+
+resources:
+  requests:
+    cpu: 200m
+
+Save the manifest.
+
+The kubelet should automatically recreate the affected static Pods.
+
+Step 4: Wait for the control-plane components to recover
+
+Give the kubelet a few moments to detect the manifest changes and restart the static Pods.
+
+If necessary, inspect the kubelet:
+
+sudo systemctl status kubelet
+
+You can also restart it if required:
+
+sudo systemctl restart kubelet
+Step 5: Verify the cluster
+
+Once the API server is available again, check the nodes:
+
+kubectl get nodes
+
+Check the control-plane components:
+
+kubectl get pods -n kube-system
