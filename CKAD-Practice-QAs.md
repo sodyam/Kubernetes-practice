@@ -527,5 +527,384 @@ Maximum replicas: 10
 ```
 kubectl autoscale deployment redis-cache -n cache-system --min=3 --max=10 --cpu-percent=80 --name=cache-hpa
 ```
+### Question
+## 16.
+The staging namespace requires a multi-container Pod where multiple configuration keys are loaded simultaneously into all containers.
 
+- Create a ConfigMap named `app-config` in the `staging` namespace with the following keys:
+  - `UI_COLOR=blue`
+  - `LOG_LEVEL=info`
+  - `FEATURE_TOGGLE=true`
+- Create a Pod named `multi-app` with two containers (`c1` and `c2`) using the image `nginx:1.25-alpine`.
+- Use the `envFrom` field in **both** containers to inject **all** keys from the ConfigMap as environment variables (do not map individual keys).
+
+### Answer
+```bash
+kubectl create cm app-config \
+  --from-literal=UI_COLOR=blue \
+  --from-literal=LOG_LEVEL=info \
+  --from-literal=FEATURE_TOGGLE=true \
+  -n staging
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: multi-app
+  namespace: staging
+spec:
+  containers:
+    - name: c1
+      image: nginx:1.25-alpine
+      envFrom:
+        - configMapRef:
+            name: app-config
+    - name: c2
+      image: nginx:1.25-alpine
+      envFrom:
+        - configMapRef:
+            name: app-config
+
+kubectl apply -f scenario2.yaml
+```
+### Question
+## 17.
+Applications in the secure-ops namespace must run under a non-default ServiceAccount with restricted API token access.
+
+Create a ServiceAccount named app-runner in the secure-ops namespace.
+Create a Pod named secure-worker using the image busybox:1.36 that sleeps for 3600 seconds.
+Set serviceAccountName: app-runner.
+Set automountServiceAccountToken: false at the Pod level.
+(Bonus) Create a Role named pod-reader that allows get and list on pods, and bind it to the ServiceAccount app-runner.
+
+### Answer
+```
+kubectl create sa app-runner -n secure-ops
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: secure-worker
+  namespace: secure-ops
+spec:
+  serviceAccountName: app-runner
+  automountServiceAccountToken: false
+  containers:
+    - name: secure-worker
+      image: busybox:1.36
+      command:
+        - /bin/sh
+        - -c
+        - sleep 3600
+
+kubectl create role pod-reader --verb=get,list --resource=pods -n secure-ops
+kubectl create rolebinding runner-binding \
+  --role=pod-reader \
+  --serviceaccount=secure-ops:app-runner \
+  -n secure-ops
+  ```
+### Question
+## 18.
+You must implement process-level security at the Pod level and specific Linux capabilities at the Container level.
+Create a Pod named security-layered using the image nginx with the following settings:
+Pod-level securityContext:
+
+runAsUser: 1000
+runAsNonRoot: true
+fsGroup: 2000
+
+Container-level securityContext:
+
+Add the NET_ADMIN capability
+Set readOnlyRootFilesystem: true
+### Answer
+```
+apiVersion: v1
+kind: Pod
+metadata:
+  name: security-layered
+spec:
+  securityContext:
+    runAsUser: 1000
+    runAsNonRoot: true
+    fsGroup: 2000
+  containers:
+    - name: security-layered
+      image: nginx
+      securityContext:
+        capabilities:
+          add:
+            - NET_ADMIN
+        readOnlyRootFilesystem: true
+kubectl apply -f scenario4.yaml
+```
+### Question
+## 20.
+An operator manages AppVault resources. You must identify the API structure and deploy an instance.
+
+Discover the short name and API version for AppVault.
+Investigate the required fields under spec.
+Create a file named vault-instance.yaml for a resource of Kind AppVault, named vault-instance, in the API group security.example.com/v1.
+
+### Answer
+```
+kubectl api-resources | grep -i AppVault
+kubectl explain appvault.spec
+kubectl explain appvault.spec --recursive
+
+apiVersion: security.example.com/v1
+kind: AppVault
+metadata:
+  name: vault-instance
+spec:
+  # Add the required fields shown by:
+  # kubectl explain appvault.spec
+```
+### Question
+## 21.
+A developer has provided a custom configuration file for an Nginx server. You must inject this file into the container without overwriting other existing configuration files in the target directory.
+
+Namespace: web-prod
+ConfigMap Name: nginx-custom-config
+Key/Value: custom.conf = server_tokens off;
+Pod Name: secure-web
+Image: nginx:1.25-alpine
+Target Path: /etc/nginx/conf.d/custom.conf
+
+Use a volume mount with subPath so that only the single file is mounted and the rest of the directory is preserved.
+### Answer
+```
+kubectl create ns web-prod
+kubectl create cm nginx-custom-config \
+  --from-literal=custom.conf='server_tokens off;' \
+  -n web-prod
+apiVersion: v1
+kind: Pod
+metadata:
+  name: secure-web
+  namespace: web-prod
+spec:
+  containers:
+    - name: secure-web
+      image: nginx:1.25-alpine
+      volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d/custom.conf
+          subPath: custom.conf
+  volumes:
+    - name: nginx-config
+      configMap:
+        name: nginx-custom-config
+kubectl apply -f secure-web.yaml
+```
+### Question
+## 22.
+The dev-team namespace is governed by strict resource controls to prevent cluster exhaustion.
+
+Create the namespace dev-team (if it does not exist).
+Create a ResourceQuota named compute-quota with the following hard limits:
+Pods: 4
+CPU Requests: 1
+CPU Limits: 2
+Memory Requests: 1Gi
+Memory Limits: 2Gi
+
+Deploy a Pod named test-worker using nginx:1.25-alpine with:
+Requests: 250m CPU, 256Mi Memory
+Limits: 500m CPU, 512Mi Memory
+
+### Answer
+```
+kubectl create ns dev-team
+
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute-quota
+  namespace: dev-team
+spec:
+  hard:
+    pods: "4"
+    requests.cpu: "1"
+    requests.memory: "1Gi"
+    limits.cpu: "2"
+    limits.memory: "2Gi"
+kubectl apply -f compute-resources.yaml
+
+kubectl run test-worker -n dev-team \
+  --image=nginx:1.25-alpine \
+  --requests='cpu=250m,memory=256Mi' \
+  --limits='cpu=500m,memory=512Mi'
+```
+### Question
+## 23.
+Certain nodes in the cluster have been reserved for specific tiers. You need to deploy a Pod to a node that has been restricted with a taint.
+
+Node Taint: tier=frontend:NoSchedule
+Namespace: prod
+Pod Name: frontend-app
+Image: nginx:1.24-alpine
+
+Configure the Pod with the necessary toleration so it can be scheduled on nodes with the above taint. The toleration must exactly match the key, value, and effect of the taint.
+
+### Answer
+```
+kubectl create ns prod
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: frontend-app
+  namespace: prod
+spec:
+  containers:
+  - name: nginx
+    image: nginx:1.24-alpine
+    imagePullPolicy: IfNotPresent
+  tolerations:
+  - key: "tier"
+    operator: "Equal"
+    value: "frontend"
+    effect: "NoSchedule"
+kubectl apply -f pod.yaml
+```
+### Question
+## 24.
+A multi-container Pod requires a shared workspace where both containers can write files. You must ensure proper permissions for group-level access.
+
+Namespace: apps
+Pod Name: multi-app-handler
+Container 1 (writer): image busybox:1.36, command touch /data/test.log && sleep 3600
+Container 2 (reader): image busybox:1.36, command sleep 3600
+Volume: emptyDir named data-vol mounted at /data in both containers
+Set fsGroup: 2000 at the Pod level
+
+### Answer
+```
+kubectl create namespace apps
+apiVersion: v1
+kind: Pod
+metadata:
+  name: multi-app-handler
+  namespace: apps
+spec:
+  securityContext:
+    fsGroup: 2000
+  containers:
+    - name: writer
+      image: busybox:1.36
+      command:
+        - /bin/sh
+        - -c
+        - touch /data/test.log && sleep 3600
+      volumeMounts:
+        - name: data-vol
+          mountPath: /data
+    - name: reader
+      image: busybox:1.36
+      command:
+        - sleep
+        - "3600"
+      volumeMounts:
+        - name: data-vol
+          mountPath: /data
+  volumes:
+    - name: data-vol
+      emptyDir: {}
+
+kubectl apply -f multi-app-handler.yaml
+```
+### Question
+## 25.
+The security team requires that images be pulled from a private registry. You must configure a ServiceAccount so that all Pods using it can automatically pull these private images.
+
+Namespace: auth
+Secret Name: private-reg-cred (type kubernetes.io/dockerconfigjson)
+Use placeholder credentials:
+server: https://index.docker.io/v1/
+username: admin
+password: secret123
+email: admin@example.com
+
+ServiceAccount Name: internal-developer (link the imagePullSecrets to the secret)
+Pod Name: private-app using image nginx:1.25-alpine and the ServiceAccount internal-developer
+### Answer
+```
+kubectl create namespace auth
+
+kubectl create secret docker-registry private-reg-cred \
+  --docker-server=https://index.docker.io/v1/ \
+  --docker-username=admin \
+  --docker-password=secret123 \
+  --docker-email=admin@example.com \
+  -n auth
+
+kubectl create serviceaccount internal-developer -n auth
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: internal-developer
+  namespace: auth
+imagePullSecrets:
+  - name: private-reg-cred
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: private-app
+  namespace: auth
+spec:
+  serviceAccountName: internal-developer
+  containers:
+    - name: private-app
+      image: nginx:1.25-alpine
+```
+
+### Question
+## 26.
+Demonstrate your understanding of how configuration changes propagate to running Pods. Compare Environment Variables (static) against Volume Mounts (dynamic).
+
+Namespace: config-test
+ConfigMap: app-settings with keys COLOR=blue and MODE=fast
+Pod: updater-pod using busybox:1.36 (sleep 3600)
+Map the key COLOR from the ConfigMap to an environment variable named APP_COLOR
+Mount the entire ConfigMap as a volume at /etc/config
+
+After the Pod is running, update the ConfigMap (COLOR=red, MODE=slow) and observe the difference between the environment variable and the mounted files.
+
+### Answer
+```
+kubectl create ns config-test
+
+kubectl create cm app-settings \
+  --from-literal=COLOR=blue \
+  --from-literal=MODE=fast \
+  -n config-test
+apiVersion: v1
+kind: Pod
+metadata:
+  name: updater-pod
+  namespace: config-test
+spec:
+  containers:
+    - name: test-container
+      image: busybox:1.36
+      command: ["/bin/sh", "-c", "sleep 3600"]
+      env:
+        - name: APP_COLOR
+          valueFrom:
+            configMapKeyRef:
+              name: app-settings
+              key: COLOR
+      volumeMounts:
+        - name: config-volume
+          mountPath: /etc/config
+  volumes:
+    - name: config-volume
+      configMap:
+        name: app-settings
+
+kubectl edit cm app-settings -n config-test
+```
+  
 
